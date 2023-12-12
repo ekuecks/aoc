@@ -1,16 +1,15 @@
 use std::io::stdin;
 use std::io::stdout;
 use std::io::Stdout;
-use std::io::Write;
 use std::str::FromStr;
-
-pub type Program = ProgramT<Stdout>;
+use std::mpsc::Receiver;
 
 #[derive(Clone)]
-pub struct ProgramT<W: Write> {
+pub struct Program {
     pub data: Vec<isize>,
-    input: Option<Vec<isize>>,
-    output: W,
+    pub input: Option<Receiver>,
+    pub output: Option<Receiver<isize>>,
+    sender: Option<Sender<isize>>,
 }
 
 impl FromStr for Program {
@@ -21,16 +20,18 @@ impl FromStr for Program {
     }
 }
 
-impl<W: Write> ProgramT<W> {
-    fn from_data(s: &str, w: W) -> Result<Self, String> {
+impl Program {
+    pub fn from_data(s: &str, w: W) -> Result<Self, String> {
         let data = s
             .split(',')
             .map(|s| s.trim().parse::<isize>().unwrap())
             .collect();
-        Ok(ProgramT {
+        let (s, r) = channel();
+        Ok(Program {
             data,
             input: None,
-            output: w,
+            output: r,
+            sender: s,
         })
     }
 
@@ -67,7 +68,7 @@ impl<W: Write> ProgramT<W> {
                 i += 2;
                 op
             } else if elem == 4 {
-                let op = Op::Output(self.data[i + 1] as usize);
+                let op = Op::Output(self.data[i + 1]);
                 i += 2;
                 op
             } else if elem == 5 {
@@ -104,7 +105,15 @@ impl<W: Write> ProgramT<W> {
     }
 
     fn eval_op(&mut self, op: Op, mask: isize) -> Option<usize> {
-        op.eval(&mut self.data, mask, self.input.as_mut(), &mut self.output)
+        op.eval(&mut self.data, mask, self.input.as_mut(), self.sender.as_mut().unwrap())
+    }
+
+    pub fn print(&mut self) {
+        self.sender = None;
+        let mut output = self.output.take();
+        while let Ok(v) = output.recv() {
+            println!("{}", v);
+        }
     }
 }
 
@@ -112,7 +121,7 @@ enum Op {
     Add(isize, isize, usize),
     Mult(isize, isize, usize),
     Input(usize),
-    Output(usize),
+    Output(isize),
     Jtrue(isize, usize),
     Jfalse(isize, usize),
     Lt(isize, isize, usize),
@@ -120,12 +129,12 @@ enum Op {
 }
 
 impl Op {
-    fn eval<W: Write>(
+    fn eval(
         &self,
         data: &mut [isize],
         mask: isize,
-        input: Option<&mut Vec<isize>>,
-        output: &mut W,
+        input: Option<&mut Receiver>,
+        output: &mut Sender<isize>,
     ) -> Option<usize> {
         match self {
             Self::Add(a, b, c) => self.binop(*a, *b, *c, data, |a, b| a + b, mask),
@@ -133,7 +142,7 @@ impl Op {
             Self::Input(l) => {
                 let mut s = String::new();
                 let value = match input {
-                    Some(input) => input.pop().unwrap(),
+                    Some(input) => input.recv().unwrap(),
                     None => {
                         stdin().read_line(&mut s).unwrap();
                         s.trim().parse().unwrap()
@@ -144,13 +153,13 @@ impl Op {
             }
             Self::Output(l) => {
                 let l = if mask % 10 == 1 {
-                    *l as isize
+                    *l
                 } else if mask % 10 == 0 {
-                    *data.get(*l).unwrap()
+                    *data.get(*l as usize).unwrap()
                 } else {
                     unreachable!();
                 };
-                writeln!(output, "{}", l).unwrap();
+                output.send(l).unwrap();
                 None
             }
             Self::Jtrue(a, b) => self.jump(*a, *b, data, |b| b != 0, mask),
@@ -288,7 +297,7 @@ mod tests {
     #[test]
     fn h() {
         let mut output: Vec<u8> = Vec::new();
-        let mut program = ProgramT::from_data("3,9,8,9,10,9,4,9,99,-1,8", &mut output).unwrap();
+        let mut program = Program::from_data("3,9,8,9,10,9,4,9,99,-1,8", &mut output).unwrap();
         program.input = Some(vec![8]);
         program.execute();
         drop(program);
@@ -299,7 +308,7 @@ mod tests {
     #[test]
     fn i() {
         let mut output: Vec<u8> = Vec::new();
-        let mut program = ProgramT::from_data("3,9,8,9,10,9,4,9,99,-1,8", &mut output).unwrap();
+        let mut program = Program::from_data("3,9,8,9,10,9,4,9,99,-1,8", &mut output).unwrap();
         program.input = Some(vec![7]);
         program.execute();
         drop(program);
@@ -310,7 +319,7 @@ mod tests {
     #[test]
     fn j() {
         let mut output: Vec<u8> = Vec::new();
-        let mut program = ProgramT::from_data("3,9,7,9,10,9,4,9,99,-1,8", &mut output).unwrap();
+        let mut program = Program::from_data("3,9,7,9,10,9,4,9,99,-1,8", &mut output).unwrap();
         program.input = Some(vec![8]);
         program.execute();
         drop(program);
@@ -321,7 +330,7 @@ mod tests {
     #[test]
     fn k() {
         let mut output: Vec<u8> = Vec::new();
-        let mut program = ProgramT::from_data("3,9,7,9,10,9,4,9,99,-1,8", &mut output).unwrap();
+        let mut program = Program::from_data("3,9,7,9,10,9,4,9,99,-1,8", &mut output).unwrap();
         program.input = Some(vec![7]);
         program.execute();
         drop(program);
@@ -332,7 +341,7 @@ mod tests {
     #[test]
     fn l() {
         let mut output: Vec<u8> = Vec::new();
-        let mut program = ProgramT::from_data("3,3,1108,-1,8,3,4,3,99", &mut output).unwrap();
+        let mut program = Program::from_data("3,3,1108,-1,8,3,4,3,99", &mut output).unwrap();
         program.input = Some(vec![8]);
         program.execute();
         drop(program);
@@ -343,7 +352,7 @@ mod tests {
     #[test]
     fn m() {
         let mut output: Vec<u8> = Vec::new();
-        let mut program = ProgramT::from_data("3,3,1108,-1,8,3,4,3,99", &mut output).unwrap();
+        let mut program = Program::from_data("3,3,1108,-1,8,3,4,3,99", &mut output).unwrap();
         program.input = Some(vec![7]);
         program.execute();
         drop(program);
@@ -354,7 +363,7 @@ mod tests {
     #[test]
     fn n() {
         let mut output: Vec<u8> = Vec::new();
-        let mut program = ProgramT::from_data("3,3,1107,-1,8,3,4,3,99", &mut output).unwrap();
+        let mut program = Program::from_data("3,3,1107,-1,8,3,4,3,99", &mut output).unwrap();
         program.input = Some(vec![8]);
         program.execute();
         drop(program);
@@ -365,7 +374,7 @@ mod tests {
     #[test]
     fn o() {
         let mut output: Vec<u8> = Vec::new();
-        let mut program = ProgramT::from_data("3,3,1107,-1,8,3,4,3,99", &mut output).unwrap();
+        let mut program = Program::from_data("3,3,1107,-1,8,3,4,3,99", &mut output).unwrap();
         program.input = Some(vec![7]);
         program.execute();
         drop(program);
@@ -378,7 +387,7 @@ mod tests {
     fn p() {
         let mut output: Vec<u8> = Vec::new();
         let mut program =
-            ProgramT::from_data("3,12,6,12,15,1,13,14,13,4,13,99,-1,0,1,9", &mut output).unwrap();
+            Program::from_data("3,12,6,12,15,1,13,14,13,4,13,99,-1,0,1,9", &mut output).unwrap();
         program.input = Some(vec![0]);
         program.execute();
         drop(program);
@@ -390,7 +399,7 @@ mod tests {
     fn q() {
         let mut output: Vec<u8> = Vec::new();
         let mut program =
-            ProgramT::from_data("3,12,6,12,15,1,13,14,13,4,13,99,-1,0,1,9", &mut output).unwrap();
+            Program::from_data("3,12,6,12,15,1,13,14,13,4,13,99,-1,0,1,9", &mut output).unwrap();
         program.input = Some(vec![7]);
         program.execute();
         drop(program);
@@ -402,7 +411,7 @@ mod tests {
     fn r() {
         let mut output: Vec<u8> = Vec::new();
         let mut program =
-            ProgramT::from_data("3,3,1105,-1,9,1101,0,0,12,4,12,99,1", &mut output).unwrap();
+            Program::from_data("3,3,1105,-1,9,1101,0,0,12,4,12,99,1", &mut output).unwrap();
         program.input = Some(vec![0]);
         program.execute();
         drop(program);
@@ -414,7 +423,7 @@ mod tests {
     fn s() {
         let mut output: Vec<u8> = Vec::new();
         let mut program =
-            ProgramT::from_data("3,3,1105,-1,9,1101,0,0,12,4,12,99,1", &mut output).unwrap();
+            Program::from_data("3,3,1105,-1,9,1101,0,0,12,4,12,99,1", &mut output).unwrap();
         program.input = Some(vec![7]);
         program.execute();
         drop(program);
