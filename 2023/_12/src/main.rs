@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::io::stdin;
+use rayon::prelude::*;
 
 fn main() {
     let mut lines: Vec<_> = stdin().lines().map(|l| l.unwrap()).collect();
@@ -33,17 +34,15 @@ fn main() {
             (a, b)
         })
         .collect();
-    let mut part1 = 0;
-    for (a, b) in inputs1.into_iter() {
+    let part1: usize = inputs1.into_par_iter().map(|(a, b)| {
         let mut memo = HashMap::new();
-        part1 += solve(a, &b, 0, 0, 0, &mut memo);
-    }
+        solve(a, &b, 0, 0, 0, &mut memo)
+    }).sum();
     dbg!(part1);
-    let mut part2 = 0;
-    for (a, b) in inputs2.into_iter() {
+    let part2: usize = inputs2.into_par_iter().map(|(a, b)| {
         let mut memo = HashMap::new();
-        part2 += solve(a, &b, 0, 0, 0, &mut memo);
-    }
+        solve(a, &b, 0, 0, 0, &mut memo)
+    }).sum();
     dbg!(part2);
 }
 
