@@ -1,8 +1,9 @@
 use intcode::ProgramT;
 use std::fs::File;
 use std::io::Read;
-use std::str::FromStr;
-use std::mpsc::Sender;
+
+use std::sync::mpsc::{channel};
+use std::thread;
 
 fn main() {
     let filename = std::env::args().nth(1).unwrap();
@@ -18,65 +19,77 @@ fn main() {
         .collect();
     let buf = String::from_utf8(buf).unwrap();
     let lines: Vec<_> = buf.split_ascii_whitespace().collect();
-    let mut programs
-    let mut inputs: Vec<_> = lines
-        .iter()
-        .map(|s| ProgramT::from_data(s.trim(), Vec::<u8>::new()).unwrap())
-        .collect();
-    let program = &mut inputs[0];
-    let mut part1 = -99999999;
+    let input = lines[0].trim();
+    let mut part2 = -99999999;
     for a in 5..=9 {
-        program.input = Some(vec![0, a]);
-        program.output = Vec::new();
-        program.execute();
-        let output = String::from_utf8(program.output.clone()).unwrap();
-        let input = output.trim().parse().unwrap();
         for b in 5..=9 {
             if a == b {
                 continue;
             }
-            program.input = Some(vec![input, b]);
-            program.output = Vec::new();
-            program.execute();
-            let output = String::from_utf8(program.output.clone()).unwrap();
-            let input = output.trim().parse().unwrap();
             for c in 5..=9 {
                 if a == c || b == c {
                     continue;
                 }
-                program.input = Some(vec![input, c]);
-                program.output = Vec::new();
-                program.execute();
-                let output = String::from_utf8(program.output.clone()).unwrap();
-                let input = output.trim().parse().unwrap();
                 for d in 5..=9 {
-                    if a == d || b== d || c == d {
+                    if a == d || b == d || c == d {
                         continue;
                     }
-                    program.input = Some(vec![input, d]);
-                    program.output = Vec::new();
-                    program.execute();
-                    let output = String::from_utf8(program.output.clone()).unwrap();
-                    let input = output.trim().parse().unwrap();
                     for e in 5..=9 {
-                        if a == e || b== e || c == e || d == e {
+                        if a == e || b == e || c == e || d == e {
                             continue;
                         }
-                        program.input = Some(vec![input, e]);
-                        program.output = Vec::new();
-                        program.execute();
-                        let output = String::from_utf8(program.output.clone()).unwrap();
-                        let input = output.trim().parse().unwrap();
-                        part1 = part1.max(input);
+                        let (s, r) = channel::<isize>();
+                        let mut programa = ProgramT::from_data(input, s, Some(r)).unwrap();
+                        let (s, r) = channel::<isize>();
+                        let mut programb = ProgramT::from_data(input, s, Some(r)).unwrap();
+                        programb.input = programa.output.take();
+                        let _ = programa.sender.as_mut().unwrap().send(b);
+                        let (s, r) = channel::<isize>();
+                        let mut programc = ProgramT::from_data(input, s, Some(r)).unwrap();
+                        programc.input = programb.output.take();
+                        let _ = programb.sender.as_mut().unwrap().send(c);
+                        let (s, r) = channel::<isize>();
+                        let mut programd = ProgramT::from_data(input, s, Some(r)).unwrap();
+                        programd.input = programc.output.take();
+                        let _ = programc.sender.as_mut().unwrap().send(d);
+                        let (s, r) = channel::<isize>();
+                        let mut programe = ProgramT::from_data(input, s, Some(r)).unwrap();
+                        programe.input = programd.output.take();
+                        let _ = programd.sender.as_mut().unwrap().send(e);
+                        programa.input = programe.output.take();
+                        let _ = programe.sender.as_mut().unwrap().send(a);
+                        let _ = programe.sender.as_mut().unwrap().send(0);
+                        let mut handles = Vec::new();
+                        handles.push(thread::spawn(move || {
+                            programa.execute();
+                            programa.input.as_mut().unwrap().recv()
+                        }));
+                        handles.push(thread::spawn(move || {
+                            programb.execute();
+                            programb.input.as_mut().unwrap().recv()
+                        }));
+                        handles.push(thread::spawn(move || {
+                            programc.execute();
+                            programc.input.as_mut().unwrap().recv()
+                        }));
+                        handles.push(thread::spawn(move || {
+                            programd.execute();
+                            programd.input.as_mut().unwrap().recv()
+                        }));
+                        handles.push(thread::spawn(move || {
+                            programe.execute();
+                            programe.input.as_mut().unwrap().recv()
+                        }));
+                        for (i, handle) in handles.into_iter().enumerate() {
+                            let output = handle.join().unwrap();
+                            if i == 0 {
+                                part2 = part2.max(output.unwrap());
+                            }
+                        }
                     }
                 }
             }
         }
     }
-    dbg!(part1);
-}
-
-
-fn run(program: Program) {
-
+    dbg!(part2);
 }

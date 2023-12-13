@@ -4,11 +4,10 @@ use std::str::FromStr;
 
 fn main() {
     let lines: Vec<_> = stdin().lines().map(|l| l.unwrap()).collect();
-    let inputs: Vec<_> = lines.into_iter().map(|s| Program::from_str(s.trim()).unwrap()).collect();
-    let program = &inputs[0];
+    let input = lines[0].trim();
     'outer: for noun in 0..99 {
         for verb in 0..99 {
-            let mut program = program.clone();
+            let mut program = Program::from_str(input).unwrap();
             program.data[1] = noun;
             program.data[2] = verb;
             program.execute();
