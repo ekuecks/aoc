@@ -2,7 +2,7 @@ use intcode::ProgramT;
 use std::fs::File;
 use std::io::Read;
 
-use std::sync::mpsc::{channel};
+use std::sync::mpsc::channel;
 use std::thread;
 
 fn main() {
